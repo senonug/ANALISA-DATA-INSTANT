@@ -1,6 +1,8 @@
 
 import streamlit as st
 import pandas as pd
+import os
+import plotly.express as px
 
 # Fungsi logika teknis
 def cek_indikator(row):
@@ -32,9 +34,11 @@ def cek_indikator(row):
 
     return indikator
 
-st.title("Dashboard Target Operasi AMR - P2TL")
+st.set_page_config(page_title="Dashboard TO AMR", layout="wide")
+st.title("📊 Dashboard Target Operasi AMR - P2TL")
+st.markdown("---")
 
-uploaded_file = st.file_uploader("Upload File Excel AMR", type=["xlsx"])
+uploaded_file = st.file_uploader("📥 Upload File Excel AMR Harian", type=["xlsx"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file, sheet_name=0)
     df = df.dropna(subset=['LOCATION_CODE'])
@@ -51,6 +55,15 @@ if uploaded_file:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+    # Gabungkan dengan data historis jika ada
+    data_path = "data_harian.csv"
+    if os.path.exists(data_path):
+        df_hist = pd.read_csv(data_path)
+        df = pd.concat([df_hist, df], ignore_index=True).drop_duplicates()
+
+    # Simpan data hasil gabungan
+    df.to_csv(data_path, index=False)
+
     indikator_list = df.apply(cek_indikator, axis=1)
     indikator_df = pd.DataFrame(indikator_list.tolist())
     result = pd.concat([df[['LOCATION_CODE']], indikator_df], axis=1)
@@ -58,11 +71,31 @@ if uploaded_file:
     result['Jumlah Potensi TO'] = indikator_df.sum(axis=1)
     top50 = result.sort_values(by='Jumlah Potensi TO', ascending=False).head(50)
 
-    st.metric("Total Data Berhasil di Analisis", len(df))
-    st.metric("Total IDPEL di Analisis", df['LOCATION_CODE'].nunique())
-    st.metric("Target Operasi Memenuhi Kriteria", sum(result['Jumlah Potensi TO'] > 0))
+    # Ringkasan
+    col1, col2, col3 = st.columns(3)
+    col1.metric("📄 Total Data", len(df))
+    col2.metric("🔢 Total IDPEL Unik", df['LOCATION_CODE'].nunique())
+    col3.metric("🎯 Potensi Target Operasi", sum(result['Jumlah Potensi TO'] > 0))
 
-    st.subheader("Top 50 Rekomendasi Target Operasi")
+    st.markdown("---")
+    st.subheader("🏆 Top 50 Rekomendasi Target Operasi")
     st.dataframe(top50, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("📈 Visualisasi Indikator Anomali")
+    indikator_counts = indikator_df.sum().sort_values(ascending=False).reset_index()
+    indikator_counts.columns = ['Indikator', 'Jumlah']
+    fig = px.bar(indikator_counts, x='Indikator', y='Jumlah', text='Jumlah', color='Indikator')
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Fitur tambahan: Unduh hasil
+    st.markdown("### 📤 Unduh Hasil Analisis")
+    csv = result.to_csv(index=False).encode('utf-8')
+    st.download_button("💾 Download CSV", csv, "hasil_analisis_to.csv", "text/csv")
+
+    # Reset histori
+    if st.button("🗑️ Hapus Semua Data Historis"):
+        os.remove(data_path)
+        st.success("Data historis berhasil dihapus.")
 else:
-    st.info("Silakan upload file Excel terlebih dahulu.")
+    st.info("Silakan upload file Excel terlebih dahulu untuk memulai analisis.")
