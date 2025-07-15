@@ -9,7 +9,7 @@ if 'data_history' not in st.session_state:
 st.title("Auto-Generate Pivot Table dari Multiple Excel dengan Konfirmasi Ekspor dan Hapus History")
 
 # Peringatan untuk data besar
-st.warning("Untuk file besar (>200MB), app mungkin lambat atau crash di Streamlit Cloud karena limit RAM 1GB. Saran: Split file jadi smaller chunks atau deploy ke platform lain seperti Heroku.")
+st.warning("Untuk file Excel besar (>200MB atau ribuan baris), app mungkin crash karena limit RAM 1GB di Streamlit Cloud. Saran: Convert ke CSV dulu untuk proses lebih efisien, atau split file jadi smaller parts. Excel tidak support chunking seperti CSV.")
 
 # Menu Hapus History
 st.subheader("Manajemen History Data")
@@ -44,19 +44,18 @@ if uploaded_files:
             selected_sheets = st.multiselect(f"Pilih sheets untuk {uploaded_file.name}", sheets, default=sheets, key=f"sheets_{uploaded_file.name}")
             
             if selected_sheets:
-                # Baca dan gabungkan sheets terpilih per file dengan chunksize untuk optimasi memory
+                # Baca dan gabungkan sheets terpilih per file (tanpa chunksize, karena tidak support di read_excel)
                 df_file = pd.DataFrame()
                 for sheet in selected_sheets:
-                    # Baca chunked (per 10000 baris) untuk handle data besar
-                    for chunk in pd.read_excel(uploaded_file, sheet_name=sheet, engine=engine, chunksize=10000):
-                        df_file = pd.concat([df_file, chunk], ignore_index=True)
+                    chunk = pd.read_excel(uploaded_file, sheet_name=sheet, engine=engine)
+                    df_file = pd.concat([df_file, chunk], ignore_index=True)
                 all_dfs.append(df_file)
                 # Hapus variabel sementara untuk free memory
                 del df_file
             else:
                 st.info(f"Pilih setidaknya satu sheet untuk file {uploaded_file.name}.")
         except Exception as e:
-            st.error(f"Error membaca file {uploaded_file.name}: {e}. Pastikan file valid dan tidak terlalu besar.")
+            st.error(f"Error membaca file {uploaded_file.name}: {e}. Pastikan file valid, tidak rusak, dan tidak terlalu besar. Coba convert ke .xlsx jika .xls.")
     
     if all_dfs:
         # Gabungkan data baru dari upload ini
@@ -84,7 +83,7 @@ if uploaded_files:
         
         if index_cols and values_cols:
             try:
-                # Generate pivot table (jika data besar, ini bisa lambat; tapi chunked membantu upstream)
+                # Generate pivot table
                 pivot = pd.pivot_table(df, index=index_cols, columns=columns_cols, values=values_cols, aggfunc=agg_func)
                 
                 # Tampilkan hasil pivot table
@@ -124,7 +123,7 @@ elif not st.session_state['data_history'].empty:
     st.subheader("Menggunakan Data History Existing")
     st.dataframe(df.head())
     
-    # Konfigurasi pivot (sama seperti di atas)
+    # Konfigurasi pivot
     st.subheader("Konfigurasi Pivot Table")
     index_cols = st.multiselect("Pilih kolom untuk Index (baris)", df.columns)
     columns_cols = st.multiselect("Pilih kolom untuk Columns (kolom)", df.columns)
