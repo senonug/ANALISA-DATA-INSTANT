@@ -8,6 +8,9 @@ if 'data_history' not in st.session_state:
 # Judul aplikasi
 st.title("Auto-Generate Pivot Table dari Multiple Excel dengan Konfirmasi Ekspor dan Hapus History")
 
+# Peringatan untuk data besar
+st.warning("Untuk file besar (>200MB), app mungkin lambat atau crash di Streamlit Cloud karena limit RAM 1GB. Saran: Split file jadi smaller chunks atau deploy ke platform lain seperti Heroku.")
+
 # Menu Hapus History
 st.subheader("Manajemen History Data")
 if not st.session_state['data_history'].empty:
@@ -41,14 +44,19 @@ if uploaded_files:
             selected_sheets = st.multiselect(f"Pilih sheets untuk {uploaded_file.name}", sheets, default=sheets, key=f"sheets_{uploaded_file.name}")
             
             if selected_sheets:
-                # Baca dan gabungkan sheets terpilih per file
-                dfs = [excel_file.parse(sheet) for sheet in selected_sheets]
-                df_file = pd.concat(dfs, ignore_index=True)
+                # Baca dan gabungkan sheets terpilih per file dengan chunksize untuk optimasi memory
+                df_file = pd.DataFrame()
+                for sheet in selected_sheets:
+                    # Baca chunked (per 10000 baris) untuk handle data besar
+                    for chunk in pd.read_excel(uploaded_file, sheet_name=sheet, engine=engine, chunksize=10000):
+                        df_file = pd.concat([df_file, chunk], ignore_index=True)
                 all_dfs.append(df_file)
+                # Hapus variabel sementara untuk free memory
+                del df_file
             else:
                 st.info(f"Pilih setidaknya satu sheet untuk file {uploaded_file.name}.")
         except Exception as e:
-            st.error(f"Error membaca file {uploaded_file.name}: {e}. Pastikan file valid.")
+            st.error(f"Error membaca file {uploaded_file.name}: {e}. Pastikan file valid dan tidak terlalu besar.")
     
     if all_dfs:
         # Gabungkan data baru dari upload ini
@@ -76,7 +84,7 @@ if uploaded_files:
         
         if index_cols and values_cols:
             try:
-                # Generate pivot table
+                # Generate pivot table (jika data besar, ini bisa lambat; tapi chunked membantu upstream)
                 pivot = pd.pivot_table(df, index=index_cols, columns=columns_cols, values=values_cols, aggfunc=agg_func)
                 
                 # Tampilkan hasil pivot table
@@ -116,7 +124,37 @@ elif not st.session_state['data_history'].empty:
     st.subheader("Menggunakan Data History Existing")
     st.dataframe(df.head())
     
-    # Sisanya sama seperti di atas (konfigurasi pivot, dll.)
-    # ... (copy bagian konfigurasi pivot dari atas ke sini jika ingin proses otomatis, tapi untuk singkat, asumsikan user bisa langsung konfigurasi)
+    # Konfigurasi pivot (sama seperti di atas)
+    st.subheader("Konfigurasi Pivot Table")
+    index_cols = st.multiselect("Pilih kolom untuk Index (baris)", df.columns)
+    columns_cols = st.multiselect("Pilih kolom untuk Columns (kolom)", df.columns)
+    values_cols = st.multiselect("Pilih kolom untuk Values (nilai yang dihitung)", df.columns)
+    agg_func = st.selectbox("Fungsi Agregasi", ['sum', 'mean', 'count', 'min', 'max'])
+    
+    if index_cols and values_cols:
+        try:
+            pivot = pd.pivot_table(df, index=index_cols, columns=columns_cols, values=values_cols, aggfunc=agg_func)
+            st.subheader("Hasil Pivot Table")
+            st.dataframe(pivot)
+            
+            st.subheader("Konfirmasi Data untuk Ekspor ke CSV")
+            st.info("Pilih kolom yang ingin disertakan dalam CSV. Default: semua kolom.")
+            export_cols = st.multiselect("Pilih kolom untuk diekspor", pivot.columns, default=list(pivot.columns))
+            
+            if export_cols:
+                pivot_export = pivot[export_cols]
+                csv = pivot_export.to_csv().encode('utf-8')
+                st.download_button(
+                    label="Konfirmasi dan Download CSV",
+                    data=csv,
+                    file_name="pivot_table_konfirmasi.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("Pilih setidaknya satu kolom untuk diekspor.")
+        except Exception as e:
+            st.error(f"Error: {e}.")
+    else:
+        st.info("Pilih setidaknya Index dan Values.")
 else:
     st.info("Upload file atau gunakan history untuk memulai.")
